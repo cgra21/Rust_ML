@@ -25,11 +25,66 @@ impl Neuron {
         self.bias += learning_rate * delta;
     }
 
+    // Getters
     pub fn weights(&self) -> &Vec<f64> {
         &self.weights
     }
 
     pub fn bias(&self) -> f64 {
         self.bias
+    }
+
+    // Setters
+    pub fn set_weights(&mut self, weights: Vec<f64>) {
+        self.weights = weights;
+    }
+
+    pub fn set_bias(&mut self, bias: f64) {
+        self.bias = bias;
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init() {
+        let neuron = Neuron::new(3);
+        assert_eq!(neuron.weights.len(), 3);
+        assert_eq!(neuron.bias, 0.0);
+    }
+    
+    #[test]
+    fn test_activation() {
+        let mut neuron = Neuron::new(3);
+        neuron.weights = vec![0.5, -0.6, 0.2];
+        neuron.bias = 0.1;
+    
+        let inputs = vec![1.0, 2.0, 3.0];
+        let output = neuron.activate(&inputs);
+        
+        let expected_output = 0.5; // Manually calculate the expected output
+        assert!((output - expected_output).abs() < 1e-6); // Allow for floating-point precision errors
+    }
+
+    #[test]
+    fn test_update_weights() {
+        let mut neuron = Neuron::new(2);
+        neuron.weights = vec![0.5, -0.5];
+        neuron.bias = 0.1;
+
+        let inputs = vec![1.0, -1.0];
+        let delta = 0.5;
+        let learning_rate = 0.1;
+
+        neuron.update_weights(&inputs, delta, learning_rate);
+
+        let expected_weights = vec![0.5 + 0.1 * 0.5 * 1.0, -0.5 + 0.1 * 0.5 * -1.0];
+        let expected_bias = 0.1 + 0.1 * 0.5;
+    
+        assert_eq!(neuron.weights, expected_weights);
+        assert!((neuron.bias - expected_bias).abs() < 1e-6);
     }
 }
