@@ -1,27 +1,118 @@
 // Define the Layer object
+use crate::activation::ActivationFunction;
+use ndarray::{Array2, Array1};
+use std::any::Any;
+use rand_distr::{Uniform, Distribution};
+use rand::thread_rng;
 
-use crate::neuron::Neuron;
+pub trait Layer {
+    fn forward(&mut self, input: &Array1<f64>) -> Array1<f64>;
+    fn backward(&mut self, delta: &Array1<f64>, learning_rate: f64) -> Array1<f64>;
 
-pub struct Layer {
-    neurons: Vec<Neuron>
+    fn as_any(&self) -> &dyn Any;
 }
 
-impl Layer {
-    pub fn new(num_neurons: usize, num_inputs: usize) -> Layer {
-        let neurons: Vec<Neuron> = (0..num_neurons)
-            .map(|_| Neuron::new(num_inputs))
-            .collect();
-        Layer { neurons }
+pub struct FCLayer {
+    weights: Array2<f64>,
+    bias: Array1<f64>,
+    input: Option<Array1<f64>>, // Store input for backprop
+}
+
+impl FCLayer {
+    pub fn new(num_inputs: usize, num_outputs: usize) -> FCLayer {
+        let mut rng = thread_rng();
+        // We will intiailize the weights with a uniform Xaiver initialization
+        let bound = (6.0 / (num_inputs + num_outputs) as f64).sqrt();
+        let uniform_dist = Uniform::from(-bound..bound);
+
+        let weights = Array2::from_shape_fn((num_outputs, num_inputs), |_| uniform_dist.sample(&mut rng));
+        let bias = Array1::zeros(num_outputs); // Initialize bias vector with zeros
+        FCLayer { weights, bias, input: None}
     }
 
-    pub fn forward(&self, inputs: &[f64]) -> Vec<f64> {
-        self.neurons.iter()
-            .map(|neuron| neuron.activate(inputs))
-            .collect()
+    // Getter for weights
+    pub fn get_weights(&self) -> &Array2<f64> {
+        &self.weights
     }
-    
-    pub fn neurons(&mut self) -> &mut Vec<Neuron> {
-        &mut self.neurons
+
+    // Getter for bias
+    pub fn get_bias(&self) -> &Array1<f64> {
+        &self.bias
+    }
+}
+
+impl Layer for FCLayer {
+    fn forward(&mut self, inputs: &Array1<f64>) -> Array1<f64> {
+        self.input = Some(inputs.clone());
+        
+        // println!("Input shape: {:?}", inputs.shape());
+        // println!("Weights shape: {:?}", self.weights.shape());
+        self.weights.dot(inputs) + &self.bias
+
+        }
+
+    fn backward(&mut self, delta: &Array1<f64>, learning_rate: f64) -> Array1<f64>{
+        let input = self.input.as_ref().expect("Input should be set in forward pass");
+
+        let input_error = self.weights.t().dot(delta);
+
+        // Reshape input to be a column vector (n, 1) and delta to be a row vector (1, m)
+        let input_col = input.to_shape((1, input.len())).unwrap();  // Shape (1, num_inputs)
+        let delta_row = delta.to_shape((delta.len(), 1)).unwrap();  // Shape (num_outputs, 1) 
+
+        // Compute the gradient: X^T . delta
+        let weights_error = delta_row.dot(&input_col); // (num_inputs, num_outputs)
+
+        // println!("Input shape: {:?}", input.shape());
+        // println!("Delta shape: {:?}", delta.shape());
+        // println!("Weights shape: {:?}", self.weights.shape());
+        // println!("Weights Error shape: {:?}", weights_error.shape());
+
+        assert_eq!(self.weights.shape(), weights_error.shape());
+
+        self.weights -= &(weights_error.mapv(|w| learning_rate * w));
+        self.bias -= &(delta.mapv(|d| learning_rate * d));
+
+        input_error
+
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+    }
+
+
+pub struct ActivationLayer {
+    activation: Box<dyn ActivationFunction>,
+    input: Option<Array1<f64>>,
+}
+
+impl ActivationLayer {
+    pub fn new(activation: Box<dyn ActivationFunction>) -> ActivationLayer {
+        ActivationLayer {
+            activation,
+            input: None,        
+        }
+    }
+}
+
+impl Layer for ActivationLayer {
+    fn forward(&mut self, input: &Array1<f64>) -> Array1<f64> {
+        self.input = Some(input.clone());
+
+        input.mapv(|x| self.activation.activate(x))
+    }
+
+    fn backward(&mut self, delta: &Array1<f64>, _learning_rate: f64) -> Array1<f64> {
+        let input = self.input.as_ref().expect("Input should be set in forward pass");
+
+        input.mapv(|x| self.activation.derivative(x)) * delta
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -30,61 +121,126 @@ impl Layer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::activation::Sigmoid;
+    use ndarray::{arr1, arr2};
 
     #[test]
-    fn test_init() {
-        let num_neurons = 3;
-        let num_inputs = 2;
-        let layer = Layer::new(num_neurons, num_inputs);
-        assert_eq!(layer.neurons.len(), num_neurons);
-        for neuron in &layer.neurons {
-            assert_eq!(neuron.weights().len(), num_inputs)
-        }
+    fn test_fc_layer_forward() {
+        let mut fc_layer = FCLayer {
+            weights: arr2(&[[0.1, 0.2], [0.3, 0.4]]),
+            bias: arr1(&[0.1, 0.2]),
+            input: None,
+        };
+
+        let input = arr1(&[1.0, 2.0]);
+
+        let output = fc_layer.forward(&input);
+
+        let expected_output = arr1(&[
+            0.1 * 1.0 + 0.2 * 2.0 + 0.1, 
+            0.3 * 1.0 + 0.4 * 2.0 + 0.2
+        ]);
+        assert_eq!(output, expected_output);
+
+
     }
 
     #[test]
-    fn test_forward() {
-        let num_neurons = 2;
-        let num_inputs = 3;
-        let mut layer = Layer::new(num_neurons, num_inputs);
+    fn test_fc_layer_backward() {
+        let mut fc_layer = FCLayer {
+            weights: arr2(&[[0.1, 0.2], [0.3, 0.4]]),
+            bias: arr1(&[0.1, 0.2]),
+            input: None,
+        };
 
-        layer.neurons[0].set_weights(vec![0.5, -0.6, 0.2]);
-        layer.neurons[0].set_bias(0.1);
+        // Need to perform forward pass to update inputs
+        let input = arr1(&[1.0, 2.0]);
 
-        layer.neurons[1].set_weights(vec![0.1, 0.4, -0.3]);
-        layer.neurons[1].set_bias(-0.2);
+        let output = fc_layer.forward(&input);
 
-        let inputs = vec![1.0, 2.0, 3.0];
-        let outputs = layer.forward(&inputs);
+        let expected_output = arr1(&[0.1 * 1.0 + 0.2 * 2.0 + 0.1, 
+                                                                        0.3 * 1.0 + 0.4 * 2.0 + 0.2]);
+        assert_eq!(output, expected_output);
 
-        // Calculate the expected outputs manually
-        let expected_output_0: f64 = 1.0 / (1.0 + (-((0.5 * 1.0) + (-0.6 * 2.0) + (0.2 * 3.0) + 0.1) as f64).exp());
-        let expected_output_1: f64 = 1.0 / (1.0 + (-((0.1 * 1.0) + (0.4 * 2.0) + (-0.3 * 3.0) - 0.2) as f64).exp());
+        let delta = arr1(&[0.1, 0.2]);
+        let learning_rate = 0.01;
 
-        let expected_outputs: Vec<f64> = vec![expected_output_0, expected_output_1];
+        let input_error = fc_layer.backward(&delta, learning_rate);
 
-        // Assert that the outputs match the expected outputs
-        for (output, expected) in outputs.iter().zip(expected_outputs.iter()) {
-            assert!((output - expected).abs() < 1e-6);
-        }
+        let expected_input_error = arr1(&[
+            0.1 * 0.1 + 0.3 * 0.2,
+            0.2 * 0.1 + 0.4 * 0.2,
+        ]);
 
-        assert_eq!(outputs.len(), num_neurons);
+        assert_eq!(input_error, expected_input_error);
+
+        let expected_updated_weights = arr2(&[
+            [0.1 - 0.01 * 1.0 * 0.1, 0.2 - 0.01 * 2.0 * 0.1],
+            [0.3 - 0.01 * 1.0 * 0.2, 0.4 - 0.01 * 2.0 * 0.2],
+        ]);
+
+        assert_eq!(fc_layer.weights, expected_updated_weights);
+
+        let expected_bias = arr1(&[
+            0.1 - 0.01 * 0.1,
+            0.2 - 0.01 * 0.2,
+        ]);
+
+        assert_eq!(fc_layer.bias, expected_bias);
 
     }
-    
-    #[test]
-    fn test_neurons_mut() {
-        let num_neurons = 2;
-        let num_inputs = 3;
-        let mut layer = Layer::new(num_neurons, num_inputs);
-        
-        let neurons = layer.neurons();
-        assert_eq!(neurons.len(), num_neurons);
 
-        // Modify the first neuron's first weight
-        neurons[0].set_weights(vec![42.0, 0.0, 0.0]);
-        
-        // Check if the modification was successful
-        assert_eq!(layer.neurons[0].weights()[0], 42.0);
-}
+    #[test]
+    fn test_activation_forward() {
+        let mut activation = ActivationLayer {
+            activation: Box::new(Sigmoid),
+            input: None,
+        };
+
+        let input = arr1(&[1.0, 2.0]);
+
+        let expected_output = arr1(&[
+            (1.0 / (1.0 + (-1.0 as f64).exp())),
+            (1.0 / (1.0 + (-2.0 as f64).exp())),
+        ]);
+
+        let output = activation.forward(&input);
+
+        assert_eq!(output, expected_output);
+
+    }
+
+    #[test]
+    fn test_activation_backward() {
+        let mut activation = ActivationLayer {
+            activation: Box::new(Sigmoid),
+            input: None,
+        };
+
+        let input = arr1(&[1.0, 2.0]);
+
+        let expected_output = arr1(&[
+            (1.0 / (1.0 + (-1.0 as f64).exp())),
+            (1.0 / (1.0 + (-2.0 as f64).exp())),
+        ]);
+
+        // Need to perform forward first in order to store input
+        let output = activation.forward(&input);
+
+        assert_eq!(output, expected_output);
+
+        let delta = arr1(&[0.1, 0.2]);
+        let learning_rate = 0.01; // This doesn't matter since there are no learnable parameters in this layer
+
+        let expected_input_error = arr1(&[
+            // (sigmoid * (1.0 - sigmoid)) * delta:
+            (1.0 / (1.0 + (-1.0 as f64).exp())) * (1.0 - (1.0 / (1.0 + (-1.0 as f64).exp()))) * delta[0],
+            (1.0 / (1.0 + (-2.0 as f64).exp())) * (1.0 - (1.0 / (1.0 + (-2.0 as f64).exp()))) * delta[1],
+        ]);
+
+        let input_error = activation.backward(&delta, learning_rate);
+
+        assert_eq!(input_error, expected_input_error); 
+    }
+
 }

@@ -1,149 +1,208 @@
 use crate::layer::Layer;
-use itertools::izip;
-
+use ndarray::Array1;
 
 pub struct MLP {
-    layers: Vec<Layer>
+    layers: Vec<Box<dyn Layer>>,
 }
 
 impl MLP {
-    pub fn new(input_size:usize, layer_sizes: &[usize]) -> MLP {
-        let mut layers: Vec<Layer> = Vec::new();
 
-        layers.push(Layer::new(layer_sizes[0], input_size));
-
-        for i in 0..layer_sizes.len() - 1 {
-            layers.push(Layer::new(layer_sizes[i + 1], layer_sizes[i]));
+    pub fn new() -> MLP {
+        MLP {
+            layers: Vec::new(), // Start with no layers
         }
-
-        MLP { layers }
     }
 
-    pub fn forward(&self, inputs: &[f64]) -> Vec<Vec<f64>> {
-        let mut activations: Vec<Vec<f64>> = vec![inputs.to_vec()];
-        for layer in &self.layers {
-            let input: &Vec<f64> = activations.last().unwrap();
-            let output: Vec<f64> = layer.forward(input);
-            activations.push(output);
-        }
-        activations
+    pub fn add_layer(&mut self, layer: Box<dyn Layer>) {
+        self.layers.push(layer);
     }
 
-    pub fn train(&mut self, inputs: &[f64], targets: &[f64], learning_rate: f64) {
-        // Forward pass
-        let activations: Vec<Vec<f64>> = self.forward(inputs);
+    pub fn remove_layer(&mut self) {
+        self.layers.pop();
+    }
+    
+    pub fn forward(&mut self, input: &ndarray::Array1<f64>) -> ndarray::Array1<f64> {
+        let mut current_input = input.clone();
+        //println!("Initial input shape: {:?}", current_input.shape());
+        for layer in self.layers.iter_mut() {
+            current_input = layer.forward(&current_input);
+            //println!("Layer output shape: {:?}", current_input.shape());
+        }
+        current_input
+    }
 
-        // Calculate output layer delta
-        let mut deltas: Vec<Vec<f64>> = Vec::new();
-        let output = activations.last().unwrap();
-        let output_delta: Vec<f64> = output.iter()
-            .zip(targets)
-            .map(|(o, t)| o * (1.0 - o) * (t - o))
-            .collect();
-        deltas.push(output_delta);
+    pub fn backward(&mut self, output_delta: &ndarray::Array1<f64>, learning_rate: f64) {
+        let mut current_delta = output_delta.clone();
+        for layer in self.layers.iter_mut().rev() {
+            current_delta = layer.backward(&current_delta, learning_rate);
+        }
+    }
 
-        // Calculate hidden layer deltas
-        for i in (1..self.layers.len() - 1).rev() {
-            let layer: &Layer = &self.layers[i];
-            let next_layer: &mut Layer = &mut self.layers[i+1];
-            let next_delta: &Vec<f64> = &deltas[0];
-            let activation: &Vec<f64> = &activations[i];
+    pub fn train(
+        &mut self, 
+        input: &ndarray::Array1<f64>, 
+        target: &ndarray::Array1<f64>, 
+        learning_rate: f64,
+        epochs: usize,
+    ) {
+        for epoch in 0..epochs {
+            let output = self.forward(input);
 
-            let delta: Vec<f64> = activation.iter()
-                .enumerate()
-                .map(|(j, a)| {
-                    let sum: f64 = next_layer.neurons().iter()
-                        .map(|neuron| neuron.weights()[j] * next_delta[j])
-                        .sum();
-                    a * (1.0 - a) * sum
-                })
-                .collect();
-            deltas.insert(0, delta);
-        
+            let delta = &output - target;
+
+            self.backward(&delta, learning_rate);
+
+            // Optionally print the loss
+            let epoch_loss = delta.mapv(|x| x.powi(2)).sum(); // Mean Square Error
+            println!("Epoch {}: Loss = {:.6}", epoch + 1, epoch_loss);
         }
 
-        // Update weights and biass
-        for (layer, delta, activation) in izip!(&mut self.layers, &deltas, &activations) {
-            for (neuron, delta) in layer.neurons().iter_mut().zip(delta) {
-                neuron.update_weights(activation, *delta, learning_rate);
+    }
+
+    pub fn train_batch(
+        &mut self, 
+        inputs: &Vec<Array1<f64>>, 
+        targets: &Vec<Array1<f64>>, 
+        learning_rate: f64, 
+        epochs: usize
+    ) {
+        for epoch in 0..epochs {
+            let mut total_loss = 0.0;
+    
+            // Accumulate the gradient over all samples before applying updates
+            for (input, target) in inputs.iter().zip(targets.iter()) {
+                let output = self.forward(input);
+                let delta = &output - target;
+    
+                total_loss += delta.mapv(|x| x.powi(2)).sum();  // Mean Square Error
+    
+                // Perform backward pass (adjusting weights) after every input
+                self.backward(&delta, learning_rate);
+            }
+    
+            // Print loss every 1000 epochs
+            if epoch % 1000 == 0 {
+                println!("Epoch {}: Total Loss = {:.6}", epoch, total_loss);
             }
         }
-
-
     }
 }
 
 
 #[cfg(test)]
 mod tests {
-    use std::iter::Sum;
-
     use super::*;
+    use crate::layer::{FCLayer, ActivationLayer};  // Assuming these are defined elsewhere
+    use crate::activation::Sigmoid;
+    use ndarray::arr1;
 
     #[test]
-    fn test_init() {
-        let input_size = 3;
-        let layer_sizes = vec![5, 2]; // 5 neurons in hidden layer, 2 neurons in output layer
+    fn test_add_layer() {
+        let mut mlp = MLP::new();
 
-        let mut mlp = MLP::new(input_size, &layer_sizes);
+        mlp.add_layer(Box::new(FCLayer::new(2,2)));
+        mlp.add_layer(Box::new(ActivationLayer::new(Box::new(Sigmoid))));
 
         assert_eq!(mlp.layers.len(), 2);
-        assert_eq!(mlp.layers[0].neurons().len(), 5);
-        assert_eq!(mlp.layers[1].neurons().len(), 2);
-
     }
-
+    
     #[test]
-    fn test_forward() {
-        let input_size = 3;
-        let layer_sizes = vec![5, 2]; // 5 neurons in hidden layer, 2 neurons in output layer
+    fn test_remove_layer() {
+        let mut mlp = MLP::new();
 
-        let mut mlp = MLP::new(input_size, &layer_sizes);
+        mlp.add_layer(Box::new(FCLayer::new(2,2)));
+        mlp.add_layer(Box::new(ActivationLayer::new(Box::new(Sigmoid))));
+        mlp.add_layer(Box::new(FCLayer::new(2, 1)));
 
-        // Manually set known weights and biases for deterministic output
-        for neuron in mlp.layers[0].neurons().iter_mut() {
-            neuron.set_weights(vec![0.1, 0.2, 0.3]);
-            neuron.set_bias(0.1);
-        }
+        mlp.remove_layer();
 
-        for neuron in mlp.layers[1].neurons().iter_mut() {
-            neuron.set_weights(vec![0.1, 0.2, 0.3, 0.4, 0.5]);
-            neuron.set_bias(0.1);
-        }
-
-        let inputs = vec![1.0, 2.0, 3.0];
-        let activations = mlp.forward(&inputs);
-
-        assert_eq!(activations.len(), 3);
-
-        let expected_output_0 = vec![0.8175745, 0.8175745, 0.8175745, 0.8175745, 0.8175745];
-
-        // Manually calculate the expected output for the second (output) layer
-        let expected_output_1: Vec<f64> = expected_output_0
-        .iter()
-        .map(|&x| 0.1 * x + 0.2 * x + 0.3 * x + 0.4 * x + 0.5 * x + 0.1)
-        .map(|z| 1.0 / (1.0 + (-z as f64).exp()))
-        .collect();
-
-
-        assert_eq!(activations[1].len(), 5);
-        assert!(activations[1]
-            .iter()
-            .zip(expected_output_0.iter())
-            .all(|(&a, &expected)| (a - expected).abs() < 1e-5)); // Handle rounding errors
-
-        assert_eq!(activations[2].len(), 2);
-        assert!(activations[2]
-            .iter()
-            .zip(expected_output_1.iter())
-            .all(|(&a, &expected)| (a - expected).abs() < 1e-5));
-        
-
+        assert_eq!(mlp.layers.len(), 2);
     }
 
     #[test]
     fn test_train() {
+        let mut mlp = MLP::new();
+    
+        // Add layers
+        mlp.add_layer(Box::new(FCLayer::new(2, 2)));  // 2 input neurons, 2 hidden neurons
+        mlp.add_layer(Box::new(ActivationLayer::new(Box::new(Sigmoid))));
+        mlp.add_layer(Box::new(FCLayer::new(2, 1)));  // 2 hidden neurons, 1 output neuron
+    
+        // Input and target
+        let input = arr1(&[0.5, 0.8]);
+        let target = arr1(&[0.2]);
+    
+        // Perform training step
+        let learning_rate = 0.01;
+        let epochs = 100;
+    
+        // Track loss to ensure it's decreasing
+        let mut previous_loss = f64::MAX;
+    
+        for epoch in 0..epochs {
+            let output = mlp.forward(&input);
+            let delta = &output - &target;
+            let current_loss = delta.mapv(|x| x.powi(2)).sum(); // Mean Square Error
+    
+            // Print the loss, weights, and biases for debugging
+            println!("Epoch {}: Loss = {:.6}", epoch + 1, current_loss);
+    
+            let weights_layer_1 = mlp.layers[0].as_any().downcast_ref::<FCLayer>().unwrap().get_weights();
+            let bias_layer_1 = mlp.layers[0].as_any().downcast_ref::<FCLayer>().unwrap().get_bias();
+            let weights_layer_2 = mlp.layers[2].as_any().downcast_ref::<FCLayer>().unwrap().get_weights();
+            let bias_layer_2 = mlp.layers[2].as_any().downcast_ref::<FCLayer>().unwrap().get_bias();
+    
+            println!("Weights Layer 1: {:?}", weights_layer_1);
+            println!("Bias Layer 1: {:?}", bias_layer_1);
+            println!("Weights Layer 2: {:?}", weights_layer_2);
+            println!("Bias Layer 2: {:?}", bias_layer_2);
+    
+            // Check if the loss is decreasing (not required but a good sanity check)
+            assert!(current_loss < previous_loss, "Loss did not decrease at epoch {}", epoch + 1);
+            previous_loss = current_loss;
+    
+            // Update the model using backward propagation
+            mlp.backward(&delta, learning_rate);
+        }
+    }
 
+    #[test]
+    fn test_train_xor_batch() {
+        let mut mlp = MLP::new();
+
+        // Add layers
+        mlp.add_layer(Box::new(FCLayer::new(2, 3)));  // 2 input neurons, 2 hidden neurons
+        mlp.add_layer(Box::new(ActivationLayer::new(Box::new(Sigmoid))));
+        mlp.add_layer(Box::new(FCLayer::new(3, 1)));  // 2 hidden neurons, 1 output neuron
+        mlp.add_layer(Box::new(ActivationLayer::new(Box::new(Sigmoid))));
+
+        // XOR input and target data
+        let inputs = vec![
+            ndarray::Array1::from_vec(vec![0.0, 0.0]),
+            ndarray::Array1::from_vec(vec![0.0, 1.0]),
+            ndarray::Array1::from_vec(vec![1.0, 0.0]),
+            ndarray::Array1::from_vec(vec![1.0, 1.0]),
+        ];
+
+        let targets = vec![
+            ndarray::Array1::from_vec(vec![0.0]),  // XOR(0, 0) = 0
+            ndarray::Array1::from_vec(vec![1.0]),  // XOR(0, 1) = 1
+            ndarray::Array1::from_vec(vec![1.0]),  // XOR(1, 0) = 1
+            ndarray::Array1::from_vec(vec![0.0]),  // XOR(1, 1) = 0
+        ];
+
+        // Training parameters
+        let learning_rate = 0.1;
+        let epochs = 10000;
+
+        // Train the network with batch updates
+        mlp.train_batch(&inputs, &targets, learning_rate, epochs);
+
+        // Test the network after training
+        for (input, target) in inputs.iter().zip(targets.iter()) {
+            let output = mlp.forward(input);
+            println!("Input: {:?}, Target: {:?}, Output: {:?}", input, target, output);
+        }
     }
 
 }
