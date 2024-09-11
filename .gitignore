@@ -1,0 +1,9 @@
+# Ignore target directory
+/target/
+
+# Ignore Cargo.lock
+Cargo.lock
+
+# Ignore IDE files
+.vscode/
+*.log
