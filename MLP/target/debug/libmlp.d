@@ -1,1 +1,0 @@
-C:\Users\cjgra\Documents\GitHub\Rust_ML\MLP\target\debug\libmlp.rlib: C:\Users\cjgra\Documents\GitHub\Rust_ML\MLP\src\activation.rs C:\Users\cjgra\Documents\GitHub\Rust_ML\MLP\src\layer.rs C:\Users\cjgra\Documents\GitHub\Rust_ML\MLP\src\lib.rs C:\Users\cjgra\Documents\GitHub\Rust_ML\MLP\src\mlp.rs
