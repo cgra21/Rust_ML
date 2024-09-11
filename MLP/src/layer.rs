@@ -12,6 +12,7 @@ pub trait Layer {
     fn as_any(&self) -> &dyn Any;
 }
 
+// Fully Connected Layer
 pub struct FCLayer {
     weights: Array2<f64>,
     bias: Array1<f64>,
@@ -83,7 +84,7 @@ impl Layer for FCLayer {
 
     }
 
-
+// Activation Layer 
 pub struct ActivationLayer {
     activation: Box<dyn ActivationFunction>,
     input: Option<Array1<f64>>,
@@ -115,6 +116,56 @@ impl Layer for ActivationLayer {
         self
     }
 }
+
+// Conv2D Layer
+pub enum Padding {
+    Valid, // Only convolutes on existiing data, no padding
+    Same, // Ensures that input will stay the same size in output
+    Explicit(usize, usize), // Explicit values (height, width)
+}
+
+pub struct Conv2D {
+    input_channels: usize, // Input features, i.e. RGB has 3 channels
+    output_channels: usize,
+    kernel_size: (usize, usize), // (kernel_height, kernel_width)
+    stride: (usize, usize), // (stride_height, stride_width)
+    padding: Padding,
+    weights: Array4<f64>, // 4D, (output_channels, input_channels, kernel_height, kernel_width)
+    // ex. (5, 3, 3, 3)
+    // [, 
+    //     [
+    //      [[1, 2, 3], [1, 2, 3], [1, 2, 3]], Weights for R channel
+    //      [[1, 2, 3], [1, 2, 3], [1, 2, 3]], Weights for B channel
+    //      [[1, 2, 3], [1, 2, 3], [1, 2, 3]], Weights for G channel
+    //     ], This is a single output channel, this will repeat 5 times, each input channel has a 3x3 kernel
+    bias: Array1<f64>,
+}
+
+impl Conv2D {
+    pub fn new(
+        input_channels: usize,
+        output_channels: usize,
+        kernel_size: (usize, usize),
+        
+    ) {
+
+    }
+}
+
+// impl Layer for Conv2D {
+//     fn forward(&mut self, input: &Array1<f64>) -> Array1<f64> {
+        
+//     }
+
+//     fn backward(&mut self, delta: &Array1<f64>, learning_rate: f64) -> Array1<f64> {
+        
+//     }
+
+//     fn as_any(&self) -> &dyn Any {
+//         self
+//     }
+// }
+
 
 
 

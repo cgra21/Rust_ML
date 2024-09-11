@@ -167,6 +167,68 @@ mod tests {
     }
 
     #[test]
+    fn test_train_xor() {
+        let mut mlp = MLP::new();
+
+        // Add layers for the XOR problem (2 input neurons, 2 hidden neurons, 1 output neuron)
+        mlp.add_layer(Box::new(FCLayer::new(2, 2)));  // 2 input neurons, 2 hidden neurons
+        mlp.add_layer(Box::new(ActivationLayer::new(Box::new(Sigmoid))));
+        mlp.add_layer(Box::new(FCLayer::new(2, 1)));  // 2 hidden neurons, 1 output neuron
+        mlp.add_layer(Box::new(ActivationLayer::new(Box::new(Sigmoid))));
+
+        // XOR input and target data
+        let inputs = vec![
+            arr1(&[0.0, 0.0]),  // XOR(0, 0) = 0
+            arr1(&[0.0, 1.0]),  // XOR(0, 1) = 1
+            arr1(&[1.0, 0.0]),  // XOR(1, 0) = 1
+            arr1(&[1.0, 1.0]),  // XOR(1, 1) = 0
+        ];
+
+        let targets = vec![
+            arr1(&[0.0]),  // Expected output for XOR(0, 0) is 0
+            arr1(&[1.0]),  // Expected output for XOR(0, 1) is 1
+            arr1(&[1.0]),  // Expected output for XOR(1, 0) is 1
+            arr1(&[0.0]),  // Expected output for XOR(1, 1) is 0
+        ];
+
+        // Training parameters
+        let learning_rate = 0.1;
+        let epochs = 10000;
+
+        // Train the network with the XOR inputs
+        for epoch in 0..epochs {
+            let mut total_loss = 0.0;
+            
+            for (input, target) in inputs.iter().zip(targets.iter()) {
+                mlp.train(input, target, learning_rate, 1);  // Train for a single epoch on each input-target pair
+
+                let output = mlp.forward(input);
+                let delta = &output - target;
+
+                total_loss += delta.mapv(|x| x.powi(2)).sum(); // Mean Squared Error (MSE)
+            }
+
+            // Optionally print the loss every 1000 epochs
+            if epoch % 1000 == 0 {
+                println!("Epoch {}: Total Loss = {:.6}", epoch, total_loss);
+            }
+
+            // Break early if the loss is sufficiently low (i.e., convergence)
+            if total_loss < 0.01 {
+                break;
+            }
+        }
+
+        // Test the trained network on the XOR problem
+        for (input, target) in inputs.iter().zip(targets.iter()) {
+            let output = mlp.forward(input);
+            println!("Input: {:?}, Target: {:?}, Output: {:?}", input, target, output);
+            assert!((output[0] - target[0]).abs() < 0.1, "Failed to predict XOR correctly.");
+        }
+    }
+
+
+    #[test]
     fn test_train_xor_batch() {
         let mut mlp = MLP::new();
 
