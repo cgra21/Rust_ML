@@ -1,5 +1,6 @@
 # Ignore target directory
 /target/
+MLP/target/
 
 # Ignore Cargo.lock
 Cargo.lock
